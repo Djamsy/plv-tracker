@@ -14,6 +14,7 @@ import Historique from './pages/Historique'
 import PLV from './pages/PLV'
 import SearchBar from './components/SearchBar'
 import toast from 'react-hot-toast'
+import InstallPWA from './components/InstallPWA'
 import './App.css'
 
 function Navigation() {
@@ -248,6 +249,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <AppRoutes />
+         <InstallPWA />
       </BrowserRouter>
     </AuthProvider>
   )
