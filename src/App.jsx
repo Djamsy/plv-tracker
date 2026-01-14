@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, useLocation, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom'
 import { useState } from 'react'
 import { AuthProvider, useAuth } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
@@ -11,6 +11,7 @@ import Modeles from './pages/Modeles'
 import Exemplaires from './pages/Exemplaires'
 import Evenements from './pages/Evenements'
 import Historique from './pages/Historique'
+import PLV from './pages/PLV'
 import SearchBar from './components/SearchBar'
 import toast from 'react-hot-toast'
 import './App.css'
@@ -24,9 +25,10 @@ function Navigation() {
     { to: '/', icon: '🏠', label: 'Dashboard' },
     { to: '/sortie', icon: '📦', label: 'Sortie' },
     { to: '/retour', icon: '⬅️', label: 'Retour' },
+    { to: '/plv', icon: '🏷️', label: 'PLV' },
     { to: '/qrcodes', icon: '📱', label: 'QR Codes' },
     { to: '/modeles', icon: '📋', label: 'Modèles' },
-    { to: '/exemplaires', icon: '🏷️', label: 'Exemplaires' },
+    { to: '/exemplaires', icon: '🔢', label: 'Exemplaires' },
     { to: '/evenements', icon: '📅', label: 'Événements' },
     { to: '/historique', icon: '📊', label: 'Historique' },
   ]
@@ -173,6 +175,16 @@ function AppRoutes() {
             <Navigation />
             <main className="main-content">
               <Retour />
+            </main>
+          </div>
+        </ProtectedRoute>
+      } />
+      <Route path="/plv" element={
+        <ProtectedRoute>
+          <div className="app">
+            <Navigation />
+            <main className="main-content">
+              <PLV />
             </main>
           </div>
         </ProtectedRoute>
