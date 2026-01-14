@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Html5QrcodeScanner } from 'html5-qrcode'
 import { supabase } from '../supabaseClient'
+import toast from 'react-hot-toast'
+import { config } from '../config'
 
 function Retour() {
   const [panierRetour, setPanierRetour] = useState([])
@@ -20,7 +22,7 @@ function Retour() {
       .eq('statut', 'sorti')
     
     if (error) {
-      console.error('Erreur:', error)
+      toast.error('Erreur lors du chargement')
       return
     }
     setPlvsSorties(data || [])
@@ -31,17 +33,17 @@ function Retour() {
     const plv = plvsSorties.find(p => p.qr_code === qrCode)
     
     if (!plv) {
-      alert('PLV non trouvée ou pas en statut "sorti" !')
+      toast.error('❌ PLV non trouvée ou pas en statut "sorti"')
       return
     }
 
     if (panierRetour.find(p => p.id === plv.id)) {
-      alert('PLV déjà scannée pour retour !')
+      toast.error('PLV déjà scannée pour retour')
       return
     }
 
     setPanierRetour([...panierRetour, { ...plv, etat_retour: 'bon' }])
-    alert(`PLV ajoutée au retour !`)
+    toast.success(`✅ ${qrCode} ajoutée au retour`)
   }
 
   const testScan = (qrCode) => {
@@ -50,12 +52,33 @@ function Retour() {
 
   const startScan = () => {
     setScanning(true)
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "qr-reader-retour",
-      { fps: 10, qrbox: 250 }
-    )
-    html5QrcodeScanner.render(onScanSuccess)
-    setScanner(html5QrcodeScanner)
+    
+    setTimeout(() => {
+      const config = {
+        fps: 10,
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0,
+        videoConstraints: {
+          facingMode: { ideal: "environment" }
+        }
+      }
+
+      const html5QrcodeScanner = new Html5QrcodeScanner("qr-reader-retour", config, false)
+      
+      html5QrcodeScanner.render(
+        (decodedText) => {
+          onScanSuccess(decodedText)
+          stopScan()
+        },
+        (error) => {
+          if (!error.includes('NotFoundException')) {
+            console.error('Erreur scan:', error)
+          }
+        }
+      )
+      
+      setScanner(html5QrcodeScanner)
+    }, 100)
   }
 
   const stopScan = () => {
@@ -67,6 +90,7 @@ function Retour() {
 
   const retirerDuPanier = (id) => {
     setPanierRetour(panierRetour.filter(p => p.id !== id))
+    toast('PLV retirée du panier retour', { icon: '🗑️' })
   }
 
   const changerEtat = (id, nouvelEtat) => {
@@ -77,9 +101,11 @@ function Retour() {
 
   const validerRetour = async () => {
     if (panierRetour.length === 0) {
-      alert('Aucune PLV à retourner !')
+      toast.error('Aucune PLV à retourner')
       return
     }
+
+    const loadingToast = toast.loading('Enregistrement du retour...')
 
     try {
       for (const plv of panierRetour) {
@@ -100,11 +126,13 @@ function Retour() {
           .is('date_retour', null)
       }
 
-      alert('✅ Retour enregistré !')
+      toast.dismiss(loadingToast)
+      toast.success('✅ Retour enregistré avec succès')
       setPanierRetour([])
       fetchPlvsSorties()
     } catch (error) {
-      alert('Erreur : ' + error.message)
+      toast.dismiss(loadingToast)
+      toast.error('Erreur : ' + error.message)
     }
   }
 
@@ -119,7 +147,7 @@ function Retour() {
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>Retour de stock</h1>
         <div style={{
           background: 'white',
@@ -133,19 +161,21 @@ function Retour() {
       </div>
 
       {/* Boutons de test */}
-      <div style={{ 
-        background: '#fef3c7', 
-        padding: '1rem', 
-        borderRadius: '0.75rem',
-        border: '2px solid #fbbf24'
-      }}>
-        <p style={{ fontWeight: '600', marginBottom: '0.5rem' }}>🧪 Mode TEST (sans caméra)</p>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <button onClick={() => testScan('PLV001')} className="btn btn-secondary">Test PLV001</button>
-          <button onClick={() => testScan('PLV002')} className="btn btn-secondary">Test PLV002</button>
-          <button onClick={() => testScan('PLV003')} className="btn btn-secondary">Test PLV003</button>
+      {config.features.testButtons && (
+        <div style={{ 
+          background: '#fef3c7', 
+          padding: '1rem', 
+          borderRadius: '0.75rem',
+          border: '2px solid #fbbf24'
+        }}>
+          <p style={{ fontWeight: '600', marginBottom: '0.5rem' }}>🧪 Mode TEST (sans caméra)</p>
+          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <button onClick={() => testScan('PLV001')} className="btn btn-secondary">Test PLV001</button>
+            <button onClick={() => testScan('PLV002')} className="btn btn-secondary">Test PLV002</button>
+            <button onClick={() => testScan('PLV003')} className="btn btn-secondary">Test PLV003</button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Scanner */}
       <div style={{ 
@@ -154,16 +184,27 @@ function Retour() {
         borderRadius: '1rem',
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
       }}>
+        <h3 style={{ fontSize: '1.125rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+          📱 Scanner un QR Code
+        </h3>
+        
         {!scanning ? (
-          <button onClick={startScan} className="btn btn-primary">
-            📷 Scanner QR Code
-          </button>
+          <>
+            <button onClick={startScan} className="btn btn-primary" style={{ width: '100%', padding: '1rem' }}>
+              📷 Activer la caméra
+            </button>
+            <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '1rem', textAlign: 'center' }}>
+              Le navigateur va demander l'accès à la caméra
+            </p>
+          </>
         ) : (
-          <button onClick={stopScan} className="btn btn-secondary">
-            ⏹ Arrêter le scan
-          </button>
+          <>
+            <div id="qr-reader-retour" style={{ width: '100%', marginBottom: '1rem' }}></div>
+            <button onClick={stopScan} className="btn btn-secondary" style={{ width: '100%' }}>
+              ✕ Arrêter le scan
+            </button>
+          </>
         )}
-        {scanning && <div id="qr-reader-retour" style={{ marginTop: '1rem' }}></div>}
       </div>
 
       {/* Panier de retour */}

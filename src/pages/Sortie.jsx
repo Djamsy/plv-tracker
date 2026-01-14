@@ -139,15 +139,36 @@ function Sortie() {
     onScanSuccess(qrCode)
   }
 
-  const startScan = () => {
-    setScanning(true)
-    const html5QrcodeScanner = new Html5QrcodeScanner(
-      "qr-reader",
-      { fps: 10, qrbox: 250 }
+const startScan = () => {
+  setScanning(true)
+  
+  setTimeout(() => {
+    const config = {
+      fps: 10,
+      qrbox: { width: 250, height: 250 },
+      aspectRatio: 1.0,
+      videoConstraints: {
+        facingMode: { ideal: "environment" }
+      }
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner("qr-reader", config, false)
+    
+    html5QrcodeScanner.render(
+      (decodedText) => {
+        onScanSuccess(decodedText)
+        stopScan()
+      },
+      (error) => {
+        if (!error.includes('NotFoundException')) {
+          console.error('Erreur scan:', error)
+        }
+      }
     )
-    html5QrcodeScanner.render(onScanSuccess)
+    
     setScanner(html5QrcodeScanner)
-  }
+  }, 100)
+}
 
   const stopScan = () => {
     if (scanner) {
@@ -285,23 +306,34 @@ function Sortie() {
             </div>
           )}
 
-          <div style={{ 
-            background: 'white', 
-            padding: '1.5rem', 
-            borderRadius: '1rem',
-            boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
-          }}>
-            {!scanning ? (
-              <button onClick={startScan} className="btn btn-primary">
-                📷 Scanner QR Code
-              </button>
-            ) : (
-              <button onClick={stopScan} className="btn btn-secondary">
-                ⏹ Arrêter le scan
-              </button>
-            )}
-            {scanning && <div id="qr-reader" style={{ marginTop: '1rem' }}></div>}
-          </div>
+         <div style={{ 
+  background: 'white', 
+  padding: '1.5rem', 
+  borderRadius: '1rem',
+  boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
+}}>
+  <h3 style={{ fontSize: '1.125rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+    📱 Scanner un QR Code
+  </h3>
+  
+  {!scanning ? (
+    <>
+      <button onClick={startScan} className="btn btn-primary" style={{ width: '100%', padding: '1rem' }}>
+        📷 Activer la caméra
+      </button>
+      <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '1rem', textAlign: 'center' }}>
+        Le navigateur va demander l'accès à la caméra
+      </p>
+    </>
+  ) : (
+    <>
+      <div id="qr-reader" style={{ width: '100%', marginBottom: '1rem' }}></div>
+      <button onClick={stopScan} className="btn btn-secondary" style={{ width: '100%' }}>
+        ✕ Arrêter le scan
+      </button>
+    </>
+  )}
+</div>
         </>
       )}
 
