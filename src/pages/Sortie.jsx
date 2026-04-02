@@ -7,6 +7,7 @@ import L from 'leaflet'
 import { genererBonDeSortie } from '../utils/pdfGenerator'
 import toast from 'react-hot-toast'
 import { config } from '../config'
+import EmptyState from '../components/EmptyState'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -290,10 +291,10 @@ const startScan = () => {
 
       {modeSelection === 'scan' && (
         <>
-          {true && (
-            <div style={{ 
-              background: '#fef3c7', 
-              padding: '1rem', 
+          {config.features.testButtons && (
+            <div style={{
+              background: '#fef3c7',
+              padding: '1rem',
               borderRadius: '0.75rem',
               border: '2px solid #fbbf24'
             }}>
@@ -447,10 +448,15 @@ const startScan = () => {
         </h2>
 
         {panier.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '3rem', color: '#9ca3af' }}>
-            <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📦</div>
-            <p style={{ fontSize: '1.125rem' }}>Aucune PLV scannée</p>
-          </div>
+          <EmptyState
+            icon="📦"
+            title="Panier vide"
+            description="Scannez ou sélectionnez des PLV pour commencer"
+            action={{
+              label: "Scanner un QR",
+              onClick: () => setModeSelection('scan')
+            }}
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
             {panier.map(plv => (
@@ -464,7 +470,7 @@ const startScan = () => {
                 borderRadius: '0.5rem'
               }}>
                 <span style={{ fontWeight: '600', fontSize: '1rem' }}>{plv.qr_code}</span>
-                <button 
+                <button
                   onClick={() => retirerDuPanier(plv.id)}
                   style={{
                     background: '#fee2e2',
