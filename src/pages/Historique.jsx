@@ -1,332 +1,265 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '../supabaseClient'
+import LoadingSpinner from '../components/LoadingSpinner'
+import EmptyState from '../components/EmptyState'
+import toast from 'react-hot-toast'
 
 function Historique() {
-  const [paniers, setPaniers] = useState([])
-  const [stats, setStats] = useState({
-    totalSorties: 0,
-    totalRetours: 0,
-    plvActives: 0,
-    eventsEnCours: 0
-  })
-  const [loading, setLoading] = useState(true)
-  const [filtres, setFiltres] = useState({
-    dateDebut: '',
-    dateFin: '',
-    statut: 'tous'
-  })
+  const [paniers, setPaniers]   = useState([])
+  const [stats, setStats]       = useState({ total: 0, termines: 0, enCours: 0, plvActives: 0 })
+  const [loading, setLoading]   = useState(true)
+  const [dateDebut, setDateDebut] = useState('')
+  const [dateFin, setDateFin]     = useState('')
+  const [statut, setStatut]       = useState('tous')
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  useEffect(() => { fetchData() }, [])
 
   async function fetchData() {
+    setLoading(true)
     try {
-      // Récupérer tous les paniers avec leurs PLV
-      const { data: paniersData, error: paniersError } = await supabase
-        .from('paniers')
-        .select(`
+      const [{ data: paniersData }, { count: plvActives }] = await Promise.all([
+        supabase.from('paniers').select(`
           *,
-          panier_plv (
-            id,
-            plv_id,
-            etat_sortie,
-            etat_retour,
-            date_retour,
-            plv:plv_id (
-              qr_code,
-              modele:modeles_plv(nom, type)
-            )
-          )
-        `)
-        .order('created_at', { ascending: false })
-      
-      if (paniersError) throw paniersError
+          panier_plv(id, plv_id, etat_sortie, etat_retour, date_retour,
+            plv:plv_id(qr_code, modele:modeles_plv(nom, type)))
+        `).order('created_at', { ascending: false }),
+        supabase.from('plv').select('*', { count: 'exact', head: true }).eq('statut', 'sorti'),
+      ])
 
-      // Calculer les stats
-      const totalSorties = paniersData?.length || 0
-      const totalRetours = paniersData?.filter(p => p.statut === 'termine').length || 0
-      const eventsEnCours = paniersData?.filter(p => p.statut === 'en_cours').length || 0
-      
-      // Compter les PLV actives (en sortie)
-      const { count: plvActivesCount } = await supabase
-        .from('plv')
-        .select('*', { count: 'exact', head: true })
-        .eq('statut', 'sorti')
-
+      const data = paniersData || []
       setStats({
-        totalSorties,
-        totalRetours,
-        plvActives: plvActivesCount || 0,
-        eventsEnCours
+        total:     data.length,
+        termines:  data.filter(p => p.statut === 'termine').length,
+        enCours:   data.filter(p => p.statut === 'en_cours').length,
+        plvActives: plvActives || 0,
       })
-
-      setPaniers(paniersData || [])
-    } catch (error) {
-      console.error('Erreur:', error.message)
+      setPaniers(data)
+    } catch {
+      toast.error('Erreur lors du chargement')
     } finally {
       setLoading(false)
     }
   }
 
-  const paniersFiltrés = paniers.filter(panier => {
-    // Filtre par date
-    if (filtres.dateDebut && panier.date_depot_prevue < filtres.dateDebut) return false
-    if (filtres.dateFin && panier.date_depot_prevue > filtres.dateFin) return false
-    
-    // Filtre par statut
-    if (filtres.statut !== 'tous' && panier.statut !== filtres.statut) return false
-    
+  const filtrés = useMemo(() => paniers.filter(p => {
+    if (dateDebut && p.date_depot_prevue < dateDebut) return false
+    if (dateFin   && p.date_depot_prevue > dateFin)   return false
+    if (statut !== 'tous' && p.statut !== statut)      return false
     return true
-  })
+  }), [paniers, dateDebut, dateFin, statut])
+
+  const resetFiltres = () => { setDateDebut(''); setDateFin(''); setStatut('tous') }
 
   const exportCSV = () => {
-    const headers = ['Date', 'Événement', 'N° Événement', 'Adresse', 'Statut', 'PLV', 'Prestataire']
-    const rows = paniersFiltrés.map(panier => [
-      panier.date_depot_prevue,
-      panier.nom_evenement,
-      panier.numero_evenement || '-',
-      panier.adresse,
-      panier.statut,
-      panier.panier_plv?.length || 0,
-      panier.nom_prestataire || '-'
-    ])
-
-    const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
-    ].join('\n')
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-    const link = document.createElement('a')
-    link.href = URL.createObjectURL(blob)
-    link.download = `historique_plv_${new Date().toISOString().split('T')[0]}.csv`
-    link.click()
+    const t = toast.loading('Génération CSV...')
+    try {
+      const headers = ['Date', 'Événement', 'N° Évén.', 'Adresse', 'Statut', 'PLV', 'Prestataire']
+      const rows = filtrés.map(p => [
+        p.date_depot_prevue,
+        p.nom_evenement,
+        p.numero_evenement || '-',
+        p.adresse,
+        p.statut,
+        p.panier_plv?.length || 0,
+        p.nom_prestataire || '-',
+      ])
+      const csv = [headers, ...rows].map(r => r.map(c => `"${c}"`).join(',')).join('\n')
+      const link = document.createElement('a')
+      link.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8;' }))
+      link.download = `historique_${new Date().toISOString().split('T')[0]}.csv`
+      link.click()
+      toast.dismiss(t)
+      toast.success(`✅ ${filtrés.length} événement${filtrés.length !== 1 ? 's' : ''} exporté${filtrés.length !== 1 ? 's' : ''}`)
+    } catch {
+      toast.dismiss(t)
+      toast.error("Erreur lors de l'export")
+    }
   }
 
-  if (loading) {
-    return (
-      <div className="loading">
-        <div className="spinner"></div>
-      </div>
-    )
-  }
+  if (loading) return <LoadingSpinner text="Chargement de l'historique..." />
+
+  const hasFilter = dateDebut || dateFin || statut !== 'tous'
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>Historique & Rapports</h1>
-          <p style={{ color: '#6b7280', marginTop: '0.25rem' }}>
-            Vue d'ensemble de toutes les sorties et retours
-          </p>
-        </div>
-        <button onClick={exportCSV} className="btn btn-primary">
-          📥 Export CSV
-        </button>
-      </div>
+    <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
 
-      {/* Stats globales */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '1rem'
-      }}>
-        <div className="stat-card">
-          <div className="stat-card-header">
-            <span className="stat-label">Total sorties</span>
-            <span className="stat-icon">📦</span>
-          </div>
-          <div className="stat-value">{stats.totalSorties}</div>
+      {/* ── Header ── */}
+      <div className="page-header">
+        <div className="page-header-text">
+          <h1>Historique & Rapports</h1>
+          <p>Vue d'ensemble de toutes les sorties et retours</p>
         </div>
-
-        <div className="stat-card">
-          <div className="stat-card-header">
-            <span className="stat-label">Événements terminés</span>
-            <span className="stat-icon">✅</span>
-          </div>
-          <div className="stat-value" style={{ color: '#10b981' }}>{stats.totalRetours}</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-card-header">
-            <span className="stat-label">En cours</span>
-            <span className="stat-icon">🔄</span>
-          </div>
-          <div className="stat-value" style={{ color: '#f59e0b' }}>{stats.eventsEnCours}</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-card-header">
-            <span className="stat-label">PLV actives</span>
-            <span className="stat-icon">🏷️</span>
-          </div>
-          <div className="stat-value" style={{ color: '#3b82f6' }}>{stats.plvActives}</div>
+        <div className="page-header-actions">
+          <button
+            onClick={exportCSV}
+            disabled={filtrés.length === 0}
+            className="btn btn-primary hover-grow"
+            style={{ opacity: filtrés.length === 0 ? 0.55 : 1, cursor: filtrés.length === 0 ? 'not-allowed' : 'pointer' }}
+          >
+            📥 Export CSV
+          </button>
         </div>
       </div>
 
-      {/* Filtres */}
-      <div style={{ 
-        background: 'white',
-        padding: '1.5rem',
-        borderRadius: '1rem',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
-      }}>
-        <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem' }}>🔍 Filtres</h2>
-        
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
-              Date début
-            </label>
-            <input
-              type="date"
-              value={filtres.dateDebut}
-              onChange={(e) => setFiltres({...filtres, dateDebut: e.target.value})}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '2px solid #e5e7eb',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem'
-              }}
+      {/* ── Stats ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '1rem' }}>
+        {[
+          { label: 'Total sorties',    value: stats.total,     icon: '📦', color: 'var(--gray-900)' },
+          { label: 'Terminés',         value: stats.termines,  icon: '✅', color: 'var(--success)'  },
+          { label: 'En cours',         value: stats.enCours,   icon: '🔄', color: 'var(--warning)'  },
+          { label: 'PLV encore sorties', value: stats.plvActives, icon: '🏷️', color: 'var(--primary)' },
+        ].map((s, i) => (
+          <div key={s.label} className="stat-card stagger-item hover-lift" style={{ animationDelay: `${i * 0.05}s` }}>
+            <div className="stat-card-header">
+              <span className="stat-label">{s.label}</span>
+              <span className="stat-icon">{s.icon}</span>
+            </div>
+            <div className="stat-value" style={{ color: s.color }}>{s.value}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Filtres ── */}
+      <div className="filter-bar">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '140px' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Début</label>
+          <input
+            type="date"
+            value={dateDebut}
+            onChange={e => setDateDebut(e.target.value)}
+            className="filter-input"
+            style={{ minWidth: 0 }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', minWidth: '140px' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Fin</label>
+          <input
+            type="date"
+            value={dateFin}
+            onChange={e => setDateFin(e.target.value)}
+            className="filter-input"
+            style={{ minWidth: 0 }}
+          />
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+          <label style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--gray-400)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Statut</label>
+          <select value={statut} onChange={e => setStatut(e.target.value)} className="filter-select">
+            <option value="tous">Tous</option>
+            <option value="en_cours">En cours</option>
+            <option value="termine">Terminé</option>
+          </select>
+        </div>
+        {hasFilter && (
+          <button onClick={resetFiltres} className="btn btn-secondary btn-sm" style={{ alignSelf: 'flex-end' }}>
+            ✕ Effacer
+          </button>
+        )}
+        <span className="filter-count" style={{ alignSelf: 'flex-end' }}>
+          {filtrés.length} résultat{filtrés.length !== 1 ? 's' : ''}
+        </span>
+      </div>
+
+      {/* ── Table / Cards ── */}
+      <div className="card animate-slideInUp">
+        <div className="card-header">
+          <h2>📋 Historique complet</h2>
+          <span className="badge badge-neutral">{filtrés.length}</span>
+        </div>
+
+        {filtrés.length === 0 ? (
+          <div className="card-body">
+            <EmptyState
+              icon="📭"
+              title="Aucun résultat"
+              description={paniers.length === 0 ? 'Créez votre premier événement depuis la page Sortie' : 'Modifiez les filtres pour voir des résultats'}
+              action={paniers.length === 0 ? { label: 'Créer un événement', onClick: () => window.location.href = '/sortie' } : hasFilter ? { label: 'Effacer les filtres', onClick: resetFiltres } : null}
             />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
-              Date fin
-            </label>
-            <input
-              type="date"
-              value={filtres.dateFin}
-              onChange={(e) => setFiltres({...filtres, dateFin: e.target.value})}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '2px solid #e5e7eb',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem'
-              }}
-            />
-          </div>
-
-          <div>
-            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500', fontSize: '0.875rem' }}>
-              Statut
-            </label>
-            <select
-              value={filtres.statut}
-              onChange={(e) => setFiltres({...filtres, statut: e.target.value})}
-              style={{
-                width: '100%',
-                padding: '0.5rem',
-                border: '2px solid #e5e7eb',
-                borderRadius: '0.5rem',
-                fontSize: '0.875rem'
-              }}
-            >
-              <option value="tous">Tous</option>
-              <option value="en_cours">En cours</option>
-              <option value="termine">Terminé</option>
-            </select>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-            <button 
-              onClick={() => setFiltres({ dateDebut: '', dateFin: '', statut: 'tous' })}
-              className="btn btn-secondary"
-              style={{ width: '100%' }}
-            >
-              🔄 Réinitialiser
-            </button>
-          </div>
-        </div>
-
-        <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '1rem' }}>
-          {paniersFiltrés.length} résultat{paniersFiltrés.length > 1 ? 's' : ''} trouvé{paniersFiltrés.length > 1 ? 's' : ''}
-        </p>
-      </div>
-
-      {/* Liste historique */}
-      <div style={{ 
-        background: 'white',
-        borderRadius: '1rem',
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)',
-        overflow: 'hidden'
-      }}>
-        <div style={{ 
-          padding: '1.5rem', 
-          borderBottom: '1px solid #e5e7eb'
-        }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold' }}>📋 Historique complet</h2>
-        </div>
-
-        {paniersFiltrés.length === 0 ? (
-          <div style={{ padding: '3rem', textAlign: 'center', color: '#9ca3af' }}>
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📭</div>
-            <p>Aucun résultat avec ces filtres</p>
           </div>
         ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead>
-                <tr style={{ background: '#f9fafb' }}>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>Date</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>Événement</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>Adresse</th>
-                  <th style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>PLV</th>
-                  <th style={{ padding: '1rem', textAlign: 'center', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>Statut</th>
-                  <th style={{ padding: '1rem', textAlign: 'left', fontWeight: '600', fontSize: '0.875rem', color: '#6b7280' }}>Prestataire</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paniersFiltrés.map(panier => (
-                  <tr key={panier.id} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                    <td style={{ padding: '1rem', fontSize: '0.875rem' }}>
-                      {new Date(panier.date_depot_prevue).toLocaleDateString('fr-FR')}
-                    </td>
-                    <td style={{ padding: '1rem' }}>
-                      <div style={{ fontWeight: '600' }}>{panier.nom_evenement}</div>
-                      {panier.numero_evenement && (
-                        <div style={{ fontSize: '0.75rem', color: '#6b7280' }}>N° {panier.numero_evenement}</div>
-                      )}
-                    </td>
-                    <td style={{ padding: '1rem', fontSize: '0.875rem', color: '#6b7280' }}>
-                      {panier.adresse}
-                    </td>
-                    <td style={{ padding: '1rem', textAlign: 'center' }}>
-                      <span style={{
-                        padding: '0.25rem 0.75rem',
-                        background: '#f3f4f6',
-                        borderRadius: '9999px',
-                        fontSize: '0.875rem',
-                        fontWeight: '600'
-                      }}>
-                        {panier.panier_plv?.length || 0}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem', textAlign: 'center' }}>
-                      <span style={{
-                        padding: '0.25rem 0.75rem',
-                        borderRadius: '9999px',
-                        fontSize: '0.75rem',
-                        fontWeight: '600',
-                        background: panier.statut === 'en_cours' ? '#fef3c7' : '#d1fae5',
-                        color: panier.statut === 'en_cours' ? '#92400e' : '#065f46'
-                      }}>
-                        {panier.statut === 'en_cours' ? '🔄 En cours' : '✅ Terminé'}
-                      </span>
-                    </td>
-                    <td style={{ padding: '1rem', fontSize: '0.875rem', color: '#6b7280' }}>
-                      {panier.nom_prestataire || '-'}
-                    </td>
+          <>
+            {/* Desktop table */}
+            <div className="table-wrapper" style={{ display: 'none' }} id="hist-table">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Événement</th>
+                    <th>Adresse</th>
+                    <th className="td-center">PLV</th>
+                    <th className="td-center">Statut</th>
+                    <th>Prestataire</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtrés.map(p => (
+                    <tr key={p.id} className="stagger-item">
+                      <td style={{ whiteSpace: 'nowrap' }}>
+                        {new Date(p.date_depot_prevue).toLocaleDateString('fr-FR')}
+                      </td>
+                      <td>
+                        <div className="td-primary">{p.nom_evenement}</div>
+                        {p.numero_evenement && <div className="td-secondary">N° {p.numero_evenement}</div>}
+                      </td>
+                      <td style={{ color: 'var(--gray-500)', fontSize: '0.875rem' }}>{p.adresse}</td>
+                      <td className="td-center">
+                        <span className="badge badge-neutral">{p.panier_plv?.length || 0}</span>
+                      </td>
+                      <td className="td-center">
+                        <span className={`badge ${p.statut === 'en_cours' ? 'badge-warning' : 'badge-success'}`}>
+                          {p.statut === 'en_cours' ? '🔄 En cours' : '✅ Terminé'}
+                        </span>
+                      </td>
+                      <td style={{ color: 'var(--gray-500)', fontSize: '0.875rem' }}>{p.nom_prestataire || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile + universal card list */}
+            <div style={{ padding: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+              {filtrés.map((p, i) => (
+                <div
+                  key={p.id}
+                  className="stagger-item"
+                  style={{
+                    padding: '1rem',
+                    border: '1.5px solid var(--gray-200)',
+                    borderRadius: 'var(--radius)',
+                    background: 'var(--gray-50)',
+                    animationDelay: `${i * 0.03}s`,
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: '180px' }}>
+                    <div style={{ fontWeight: '700', fontSize: '0.9375rem', color: 'var(--gray-900)', marginBottom: '0.25rem' }}>
+                      {p.nom_evenement}
+                    </div>
+                    {p.numero_evenement && (
+                      <div style={{ fontSize: '0.8125rem', color: 'var(--gray-400)', marginBottom: '0.25rem' }}>
+                        N° {p.numero_evenement}
+                      </div>
+                    )}
+                    <div style={{ fontSize: '0.8125rem', color: 'var(--gray-500)', display: 'flex', flexDirection: 'column', gap: '0.125rem' }}>
+                      <span>📅 {new Date(p.date_depot_prevue).toLocaleDateString('fr-FR')}</span>
+                      <span>📍 {p.adresse}</span>
+                      {p.nom_prestataire && <span>👤 {p.nom_prestataire}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
+                    <span className={`badge ${p.statut === 'en_cours' ? 'badge-warning' : 'badge-success'}`}>
+                      {p.statut === 'en_cours' ? '🔄 En cours' : '✅ Terminé'}
+                    </span>
+                    <span className="badge badge-neutral">{p.panier_plv?.length || 0} PLV</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
     </div>

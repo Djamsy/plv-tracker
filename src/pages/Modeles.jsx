@@ -1,10 +1,14 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import LoadingSpinner from '../components/LoadingSpinner'
+import EmptyState from '../components/EmptyState'
+import toast from 'react-hot-toast'
 
 function Modeles() {
   const [modeles, setModeles] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [formData, setFormData] = useState({
     nom: '',
     type: '',
@@ -18,6 +22,7 @@ function Modeles() {
   }, [])
 
   async function fetchModeles() {
+    setLoading(true)
     try {
       const { data, error } = await supabase
         .from('modeles_plv')
@@ -27,7 +32,7 @@ function Modeles() {
       if (error) throw error
       setModeles(data || [])
     } catch (error) {
-      console.error('Erreur:', error.message)
+      toast.error('Erreur lors du chargement')
     } finally {
       setLoading(false)
     }
@@ -35,37 +40,42 @@ function Modeles() {
 
   const handleSubmit = async () => {
     if (!formData.nom || !formData.type) {
-      alert('Le nom et le type sont obligatoires !')
+      toast.error('Le nom et le type sont obligatoires !')
       return
     }
 
+    setSubmitting(true)
+    const loadingToast = toast.loading(editingId ? 'Mise à jour...' : 'Création...')
+
     try {
       if (editingId) {
-        // Modification
         const { error } = await supabase
           .from('modeles_plv')
           .update(formData)
           .eq('id', editingId)
         
         if (error) throw error
-        alert('✅ Modèle mis à jour !')
+        toast.dismiss(loadingToast)
+        toast.success('✅ Modèle mis à jour !')
       } else {
-        // Création
         const { error } = await supabase
           .from('modeles_plv')
           .insert([formData])
         
         if (error) throw error
-        alert('✅ Modèle créé !')
+        toast.dismiss(loadingToast)
+        toast.success('✅ Modèle créé !')
       }
 
-      // Réinitialiser
       setFormData({ nom: '', type: '', categorie: '', description: '' })
       setShowForm(false)
       setEditingId(null)
       fetchModeles()
     } catch (error) {
-      alert('Erreur : ' + error.message)
+      toast.dismiss(loadingToast)
+      toast.error('Erreur : ' + error.message)
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -80,23 +90,66 @@ function Modeles() {
     setShowForm(true)
   }
 
-  const handleDelete = async (id) => {
-    if (!confirm('Supprimer ce modèle ? Les exemplaires associés seront également supprimés.')) {
-      return
-    }
-
-    try {
-      const { error } = await supabase
-        .from('modeles_plv')
-        .delete()
-        .eq('id', id)
-      
-      if (error) throw error
-      alert('✅ Modèle supprimé !')
-      fetchModeles()
-    } catch (error) {
-      alert('Erreur : ' + error.message)
-    }
+  const handleDelete = async (id, nom) => {
+    toast((t) => (
+      <div>
+        <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+          Supprimer "{nom}" ?
+        </p>
+        <p style={{ fontSize: '0.875rem', color: '#6b7280', marginBottom: '0.75rem' }}>
+          Les exemplaires associés seront également supprimés.
+        </p>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={async () => {
+              toast.dismiss(t.id)
+              const loadingToast = toast.loading('Suppression...')
+              try {
+                const { error } = await supabase
+                  .from('modeles_plv')
+                  .delete()
+                  .eq('id', id)
+                
+                if (error) throw error
+                toast.dismiss(loadingToast)
+                toast.success('✅ Modèle supprimé !')
+                fetchModeles()
+              } catch (error) {
+                toast.dismiss(loadingToast)
+                toast.error('Erreur : ' + error.message)
+              }
+            }}
+            style={{
+              flex: 1,
+              background: '#ef4444',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '0.5rem',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: '600'
+            }}
+          >
+            Supprimer
+          </button>
+          <button
+            onClick={() => toast.dismiss(t.id)}
+            style={{
+              flex: 1,
+              background: '#6b7280',
+              color: 'white',
+              padding: '0.5rem 1rem',
+              borderRadius: '0.5rem',
+              border: 'none',
+              cursor: 'pointer',
+              fontWeight: '600'
+            }}
+          >
+            Annuler
+          </button>
+        </div>
+      </div>
+    ), { duration: Infinity })
   }
 
   const cancelForm = () => {
@@ -105,232 +158,213 @@ function Modeles() {
     setFormData({ nom: '', type: '', categorie: '', description: '' })
   }
 
+  const getTypeIcon = (type) => {
+    const icons = {
+      'kakemono': '🎏',
+      'stop-rayon': '🛑',
+      'présentoir': '📦',
+      'totem': '🗿',
+      'vitrophanie': '🪟',
+      'Roll-up': '📜',
+      'affiche': '🖼️',
+      'banderole': '🎌',
+      'autre': '📋'
+    }
+    return icons[type] || '📋'
+  }
+
   if (loading) {
-    return (
-      <div className="loading">
-        <div className="spinner"></div>
-      </div>
-    )
+    return <LoadingSpinner text="Chargement des modèles..." />
   }
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
-        <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>Gestion des modèles</h1>
-          <p style={{ color: '#6b7280', marginTop: '0.25rem' }}>
-            {modeles.length} modèle{modeles.length > 1 ? 's' : ''} de PLV
-          </p>
+      <div className="page-header">
+        <div className="page-header-text">
+          <h1>Modèles de PLV</h1>
+          <p>{modeles.length} modèle{modeles.length !== 1 ? 's' : ''} enregistré{modeles.length !== 1 ? 's' : ''}</p>
         </div>
         {!showForm && (
-          <button onClick={() => setShowForm(true)} className="btn btn-primary">
-            ➕ Nouveau modèle
-          </button>
+          <div className="page-header-actions">
+            <button onClick={() => setShowForm(true)} className="btn btn-primary hover-grow">
+              ➕ Nouveau modèle
+            </button>
+          </div>
         )}
       </div>
 
       {/* Formulaire */}
       {showForm && (
-        <div style={{ 
-          background: 'white',
-          padding: '2rem', 
-          borderRadius: '1rem',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
-        }}>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', marginBottom: '1.5rem' }}>
-            {editingId ? '✏️ Modifier le modèle' : '➕ Nouveau modèle'}
-          </h2>
+        <div className="card animate-slideInUp">
+          <div className="card-header">
+            <h2>{editingId ? '✏️ Modifier le modèle' : '➕ Nouveau modèle'}</h2>
+          </div>
+          <div className="card-body">
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
-                Nom du modèle *
-              </label>
+            <div className="form-group stagger-item">
+              <label className="form-label">Nom du modèle *</label>
               <input
                 type="text"
                 placeholder="Ex: Kakemono Nike Air Max 2m"
                 value={formData.nom}
                 onChange={(e) => setFormData({...formData, nom: e.target.value})}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '2px solid #e5e7eb',
-                  borderRadius: '0.5rem',
-                  fontSize: '1rem'
-                }}
+                disabled={submitting}
+                className="form-input"
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
-                  Type *
-                </label>
+            <div className="form-grid-2 stagger-item" style={{ animationDelay: '0.05s' }}>
+              <div className="form-group">
+                <label className="form-label">Type *</label>
                 <select
                   value={formData.type}
                   onChange={(e) => setFormData({...formData, type: e.target.value})}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    border: '2px solid #e5e7eb',
-                    borderRadius: '0.5rem',
-                    fontSize: '1rem'
-                  }}
+                  disabled={submitting}
+                  className="form-input"
                 >
                   <option value="">Sélectionner un type</option>
-                  <option value="kakemono">Kakemono</option>
-                  <option value="stop-rayon">Stop rayon</option>
-                  <option value="présentoir">Présentoir</option>
-                  <option value="totem">Totem</option>
-                  <option value="vitrophanie">Vitrophanie</option>
-                  <option value="autre">Autre</option>
-                  <option value="Roll-up">Roll-up</option>
-                  <option value="affiche">Affiche</option>
-                  <option value="banderole">Banderole</option>
+                  <option value="kakemono">🎏 Kakemono</option>
+                  <option value="stop-rayon">🛑 Stop rayon</option>
+                  <option value="présentoir">📦 Présentoir</option>
+                  <option value="totem">🗿 Totem</option>
+                  <option value="vitrophanie">🪟 Vitrophanie</option>
+                  <option value="Roll-up">📜 Roll-up</option>
+                  <option value="affiche">🖼️ Affiche</option>
+                  <option value="banderole">🎌 Banderole</option>
+                  <option value="autre">📋 Autre</option>
                 </select>
               </div>
-
-             <div>
-  <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
-    Catégorie
-  </label>
-  <select
-    value={formData.categorie}
-    onChange={(e) => setFormData({...formData, categorie: e.target.value})}
-    style={{
-      width: '100%',
-      padding: '0.75rem',
-      border: '2px solid #e5e7eb',
-      borderRadius: '0.5rem',
-      fontSize: '1rem'
-    }}
-  >
-    <option value="">Sélectionner une catégorie</option>
-    <option value="Sport">Sport</option>
-    <option value="Culture">Culture</option>
-    <option value="Education">Éducation</option>
-    <option value="Action Sociale">Action Sociale</option>
-    <option value="Tourisme">Tourisme</option>
-    <option value="Agriculture">Agriculture</option>
-    <option value="Artisanat">Artisanat</option>
-    <option value="Environnement">Environnement</option>
-    <option value="Santé">Santé</option>
-    <option value="Événementiel">Événementiel</option>
-    <option value="Commerce">Commerce</option>
-    <option value="Autre">Autre</option>
-  </select>
-</div>
+              <div className="form-group">
+                <label className="form-label">Catégorie</label>
+                <select
+                  value={formData.categorie}
+                  onChange={(e) => setFormData({...formData, categorie: e.target.value})}
+                  disabled={submitting}
+                  className="form-input"
+                >
+                  <option value="">Sélectionner une catégorie</option>
+                  <option value="Sport">🏃 Sport</option>
+                  <option value="Culture">🎭 Culture</option>
+                  <option value="Education">📚 Éducation</option>
+                  <option value="Action Sociale">🤝 Action Sociale</option>
+                  <option value="Tourisme">✈️ Tourisme</option>
+                  <option value="Agriculture">🌾 Agriculture</option>
+                  <option value="Artisanat">🛠️ Artisanat</option>
+                  <option value="Environnement">🌍 Environnement</option>
+                  <option value="Santé">🏥 Santé</option>
+                  <option value="Événementiel">🎪 Événementiel</option>
+                  <option value="Commerce">🛒 Commerce</option>
+                  <option value="Autre">📋 Autre</option>
+                </select>
+              </div>
             </div>
 
-            <div>
-              <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
-                Description
-              </label>
+            <div className="form-group stagger-item" style={{ animationDelay: '0.1s' }}>
+              <label className="form-label">Description</label>
               <textarea
                 placeholder="Ex: Kakemono enroulable 2m x 80cm avec housse de transport"
                 value={formData.description}
                 onChange={(e) => setFormData({...formData, description: e.target.value})}
+                disabled={submitting}
                 rows={3}
-                style={{
-                  width: '100%',
-                  padding: '0.75rem',
-                  border: '2px solid #e5e7eb',
-                  borderRadius: '0.5rem',
-                  fontSize: '1rem',
-                  fontFamily: 'inherit',
-                  resize: 'vertical'
-                }}
+                className="form-input"
+                style={{ resize: 'vertical' }}
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-              <button onClick={handleSubmit} className="btn btn-primary">
-                {editingId ? '✅ Enregistrer' : '➕ Créer le modèle'}
+            <div className="stagger-item" style={{ display: 'flex', gap: '0.75rem', animationDelay: '0.15s' }}>
+              <button
+                onClick={handleSubmit}
+                disabled={submitting}
+                className={`btn btn-primary hover-grow ${submitting ? 'btn-loading' : ''}`}
+                style={{ flex: 1 }}
+              >
+                {submitting ? '' : editingId ? '✅ Enregistrer' : '➕ Créer le modèle'}
               </button>
-              <button onClick={cancelForm} className="btn btn-secondary">
-                ❌ Annuler
+              <button
+                onClick={cancelForm}
+                disabled={submitting}
+                className="btn btn-secondary hover-grow"
+              >
+                Annuler
               </button>
             </div>
+          </div>
           </div>
         </div>
       )}
 
       {/* Liste des modèles */}
       {modeles.length === 0 ? (
-        <div style={{ 
-          background: 'white',
-          padding: '4rem',
-          borderRadius: '1rem',
-          textAlign: 'center',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
-        }}>
-          <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📦</div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>
-            Aucun modèle
-          </h2>
-          <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
-            Créez votre premier modèle de PLV pour commencer
-          </p>
-          <button onClick={() => setShowForm(true)} className="btn btn-primary">
-            ➕ Créer un modèle
-          </button>
-        </div>
+        <EmptyState
+          icon="📦"
+          title="Aucun modèle"
+          description="Créez votre premier modèle de PLV pour commencer"
+          action={{
+            label: "➕ Créer un modèle",
+            onClick: () => setShowForm(true)
+          }}
+        />
       ) : (
         <div style={{ 
           display: 'grid', 
           gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
           gap: '1.5rem'
         }}>
-          {modeles.map(modele => (
+          {modeles.map((modele, index) => (
             <div 
               key={modele.id}
+              className="card-interactive hover-lift stagger-item"
               style={{
                 background: 'white',
                 padding: '1.5rem',
                 borderRadius: '1rem',
                 boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)',
                 border: '2px solid #e5e7eb',
-                transition: 'all 0.3s'
+                animationDelay: `${index * 0.05}s`
               }}
-              className="stat-card"
             >
               <div style={{ marginBottom: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'start', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', flex: 1 }}>
-                    {modele.nom}
-                  </h3>
-                </div>
-                
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                  <span style={{
-                    padding: '0.25rem 0.75rem',
-                    background: '#f3f4f6',
-                    borderRadius: '0.375rem',
-                    fontSize: '0.875rem',
-                    fontWeight: '500'
-                  }}>
-                    {modele.type}
-                  </span>
-                  {modele.categorie && (
-                    <span style={{
-                      padding: '0.25rem 0.75rem',
-                      background: '#e0e7ff',
-                      color: '#4338ca',
-                      borderRadius: '0.375rem',
-                      fontSize: '0.875rem',
-                      fontWeight: '500'
-                    }}>
-                      {modele.categorie}
-                    </span>
-                  )}
+                <div style={{ display: 'flex', alignItems: 'start', gap: '0.75rem', marginBottom: '0.75rem' }}>
+                  <div style={{ fontSize: '2rem' }}>{getTypeIcon(modele.type)}</div>
+                  <div style={{ flex: 1 }}>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>
+                      {modele.nom}
+                    </h3>
+                    <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                      <span style={{
+                        padding: '0.25rem 0.75rem',
+                        background: '#f3f4f6',
+                        borderRadius: '0.375rem',
+                        fontSize: '0.875rem',
+                        fontWeight: '500'
+                      }}>
+                        {modele.type}
+                      </span>
+                      {modele.categorie && (
+                        <span style={{
+                          padding: '0.25rem 0.75rem',
+                          background: '#e0e7ff',
+                          color: '#4338ca',
+                          borderRadius: '0.375rem',
+                          fontSize: '0.875rem',
+                          fontWeight: '500'
+                        }}>
+                          {modele.categorie}
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 </div>
 
                 {modele.description && (
                   <p style={{ 
                     fontSize: '0.875rem', 
                     color: '#6b7280',
-                    lineHeight: '1.5'
+                    lineHeight: '1.5',
+                    marginTop: '0.75rem'
                   }}>
                     {modele.description}
                   </p>
@@ -340,6 +374,7 @@ function Modeles() {
               <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button 
                   onClick={() => handleEdit(modele)}
+                  className="hover-grow"
                   style={{
                     flex: 1,
                     padding: '0.5rem',
@@ -354,7 +389,8 @@ function Modeles() {
                   ✏️ Modifier
                 </button>
                 <button 
-                  onClick={() => handleDelete(modele.id)}
+                  onClick={() => handleDelete(modele.id, modele.nom)}
+                  className="hover-grow"
                   style={{
                     flex: 1,
                     padding: '0.5rem',

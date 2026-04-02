@@ -1,21 +1,28 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../supabaseClient'
+import LoadingSpinner from '../components/LoadingSpinner'
+import EmptyState from '../components/EmptyState'
+import toast from 'react-hot-toast'
+import { useNavigate } from 'react-router-dom'
 
 function Exemplaires() {
   const [modeles, setModeles] = useState([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [formData, setFormData] = useState({
     modele_id: '',
     quantite: 1,
     prefix: 'PLV'
   })
+  const navigate = useNavigate()
 
   useEffect(() => {
     fetchModeles()
   }, [])
 
   async function fetchModeles() {
+    setLoading(true)
     try {
       const { data, error } = await supabase
         .from('modeles_plv')
@@ -25,14 +32,13 @@ function Exemplaires() {
       if (error) throw error
       setModeles(data || [])
     } catch (error) {
-      console.error('Erreur:', error.message)
+      toast.error('Erreur lors du chargement')
     } finally {
       setLoading(false)
     }
   }
 
   const genererProchainQRCode = async (prefix, index = 0) => {
-    // Récupérer tous les QR codes avec ce préfixe
     const { data: plvs } = await supabase
       .from('plv')
       .select('qr_code')
@@ -41,7 +47,6 @@ function Exemplaires() {
 
     let maxNumber = 0
     if (plvs && plvs.length > 0) {
-      // Extraire tous les numéros
       plvs.forEach(plv => {
         const match = plv.qr_code.match(/\d+$/)
         if (match) {
@@ -56,19 +61,21 @@ function Exemplaires() {
 
   const handleSubmit = async () => {
     if (!formData.modele_id) {
-      alert('Sélectionne un modèle !')
+      toast.error('Sélectionne un modèle !')
       return
     }
 
     if (formData.quantite < 1 || formData.quantite > 50) {
-      alert('Quantité entre 1 et 50 !')
+      toast.error('Quantité entre 1 et 50 !')
       return
     }
+
+    setGenerating(true)
+    const loadingToast = toast.loading(`Génération de ${formData.quantite} exemplaire(s)...`)
 
     try {
       const exemplaires = []
       
-      // Générer les exemplaires
       for (let i = 0; i < formData.quantite; i++) {
         const qrCode = await genererProchainQRCode(formData.prefix, i)
         exemplaires.push({
@@ -84,57 +91,85 @@ function Exemplaires() {
       
       if (error) throw error
 
-      alert(`✅ ${formData.quantite} exemplaire(s) créé(s) avec succès !`)
+      toast.dismiss(loadingToast)
+      toast.success(`✅ ${formData.quantite} exemplaire(s) créé(s) avec succès !`)
+      
       setFormData({ modele_id: '', quantite: 1, prefix: 'PLV' })
       setShowForm(false)
+      
+      // Proposer de voir les QR codes
+      setTimeout(() => {
+        toast((t) => (
+          <div>
+            <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>
+              Voir les QR codes ?
+            </p>
+            <button
+              onClick={() => {
+                toast.dismiss(t.id)
+                navigate('/qrcodes')
+              }}
+              style={{
+                background: '#667eea',
+                color: 'white',
+                padding: '0.5rem 1rem',
+                borderRadius: '0.5rem',
+                border: 'none',
+                cursor: 'pointer',
+                fontWeight: '600',
+                width: '100%'
+              }}
+            >
+              📱 Voir les QR codes
+            </button>
+          </div>
+        ), { duration: 5000 })
+      }, 500)
+      
     } catch (error) {
-      alert('Erreur : ' + error.message)
+      toast.dismiss(loadingToast)
+      toast.error('Erreur : ' + error.message)
+    } finally {
+      setGenerating(false)
     }
   }
 
   if (loading) {
-    return (
-      <div className="loading">
-        <div className="spinner"></div>
-      </div>
-    )
+    return <LoadingSpinner text="Chargement des modèles..." />
   }
 
   if (modeles.length === 0) {
     return (
-      <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+      <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
         <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>Créer des exemplaires</h1>
-        <div style={{ 
-          background: 'white',
-          padding: '4rem',
-          borderRadius: '1rem',
-          textAlign: 'center',
-          boxShadow: '0 4px 6px rgba(0, 0, 0, 0.07)'
-        }}>
-          <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>📦</div>
-          <h2 style={{ fontSize: '1.5rem', fontWeight: 'bold', color: '#1f2937', marginBottom: '0.5rem' }}>
-            Aucun modèle disponible
-          </h2>
-          <p style={{ color: '#6b7280', marginBottom: '1.5rem' }}>
-            Créez d'abord des modèles de PLV avant de générer des exemplaires
-          </p>
-        </div>
+        <EmptyState
+          icon="📦"
+          title="Aucun modèle disponible"
+          description="Créez d'abord des modèles de PLV avant de générer des exemplaires"
+          action={{
+            label: "➕ Créer un modèle",
+            onClick: () => navigate('/modeles')
+          }}
+        />
       </div>
     )
   }
 
   return (
-    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+    <div className="animate-fadeIn" style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
         <div>
           <h1 style={{ fontSize: '2rem', fontWeight: 'bold', color: '#1f2937' }}>Créer des exemplaires</h1>
           <p style={{ color: '#6b7280', marginTop: '0.25rem' }}>
-            Génération automatique de QR codes
+            Génération automatique de QR codes séquentiels
           </p>
         </div>
         {!showForm && (
-          <button onClick={() => setShowForm(true)} className="btn btn-primary">
+          <button 
+            onClick={() => setShowForm(true)} 
+            className="btn btn-primary hover-grow"
+          >
             ➕ Créer des exemplaires
           </button>
         )}
@@ -142,7 +177,7 @@ function Exemplaires() {
 
       {/* Formulaire */}
       {showForm && (
-        <div style={{ 
+        <div className="animate-slideInUp" style={{ 
           background: 'white',
           padding: '2rem', 
           borderRadius: '1rem',
@@ -153,19 +188,22 @@ function Exemplaires() {
           </h2>
           
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <div>
+            <div className="stagger-item">
               <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
                 Modèle de PLV *
               </label>
               <select
                 value={formData.modele_id}
                 onChange={(e) => setFormData({...formData, modele_id: e.target.value})}
+                disabled={generating}
                 style={{
                   width: '100%',
                   padding: '0.75rem',
                   border: '2px solid #e5e7eb',
                   borderRadius: '0.5rem',
-                  fontSize: '1rem'
+                  fontSize: '1rem',
+                  cursor: generating ? 'not-allowed' : 'pointer',
+                  opacity: generating ? 0.6 : 1
                 }}
               >
                 <option value="">Sélectionner un modèle</option>
@@ -177,7 +215,7 @@ function Exemplaires() {
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem' }}>
+            <div className="stagger-item" style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '1rem', animationDelay: '0.05s' }}>
               <div>
                 <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '600', color: '#374151' }}>
                   Préfixe QR Code
@@ -187,12 +225,15 @@ function Exemplaires() {
                   placeholder="Ex: PLV, KAK, STOP..."
                   value={formData.prefix}
                   onChange={(e) => setFormData({...formData, prefix: e.target.value.toUpperCase()})}
+                  disabled={generating}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
                     border: '2px solid #e5e7eb',
                     borderRadius: '0.5rem',
-                    fontSize: '1rem'
+                    fontSize: '1rem',
+                    cursor: generating ? 'not-allowed' : 'text',
+                    opacity: generating ? 0.6 : 1
                   }}
                 />
                 <p style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
@@ -209,34 +250,51 @@ function Exemplaires() {
                   min="1"
                   max="50"
                   value={formData.quantite}
-                  onChange={(e) => setFormData({...formData, quantite: parseInt(e.target.value)})}
+                  onChange={(e) => setFormData({...formData, quantite: parseInt(e.target.value) || 1})}
+                  disabled={generating}
                   style={{
                     width: '100%',
                     padding: '0.75rem',
                     border: '2px solid #e5e7eb',
                     borderRadius: '0.5rem',
-                    fontSize: '1rem'
+                    fontSize: '1rem',
+                    cursor: generating ? 'not-allowed' : 'text',
+                    opacity: generating ? 0.6 : 1
                   }}
                 />
               </div>
             </div>
 
-            <div style={{
+            <div className="stagger-item" style={{
               padding: '1rem',
               background: '#f0fdf4',
               border: '2px solid #86efac',
-              borderRadius: '0.5rem'
+              borderRadius: '0.5rem',
+              animationDelay: '0.1s'
             }}>
               <p style={{ fontSize: '0.875rem', fontWeight: '500', color: '#065f46' }}>
-                💡 {formData.quantite} QR code(s) seront générés automatiquement
+                💡 {formData.quantite} QR code(s) seront générés automatiquement avec numérotation séquentielle
               </p>
             </div>
 
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
-              <button onClick={handleSubmit} className="btn btn-primary">
-                ✅ Créer les exemplaires
+            <div className="stagger-item" style={{ display: 'flex', gap: '1rem', marginTop: '1rem', animationDelay: '0.15s' }}>
+              <button 
+                onClick={handleSubmit} 
+                disabled={generating}
+                className={`btn btn-primary hover-grow ${generating ? 'btn-loading' : ''}`}
+                style={{ flex: 1 }}
+              >
+                {generating ? '' : '✅ Créer les exemplaires'}
               </button>
-              <button onClick={() => setShowForm(false)} className="btn btn-secondary">
+              <button 
+                onClick={() => setShowForm(false)} 
+                disabled={generating}
+                className="btn btn-secondary hover-grow"
+                style={{ 
+                  opacity: generating ? 0.6 : 1,
+                  cursor: generating ? 'not-allowed' : 'pointer'
+                }}
+              >
                 ❌ Annuler
               </button>
             </div>
@@ -244,8 +302,37 @@ function Exemplaires() {
         </div>
       )}
 
+      {/* Stats card */}
+      <div className="animate-slideInUp" style={{ 
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '1rem'
+      }}>
+        {modeles.slice(0, 4).map((modele, index) => (
+          <div 
+            key={modele.id}
+            className="stat-card hover-lift stagger-item"
+            style={{ animationDelay: `${index * 0.05}s` }}
+          >
+            <div className="stat-card-header">
+              <span className="stat-label">{modele.nom}</span>
+              <span className="stat-icon">
+                {modele.type === 'kakemono' ? '🎏' : 
+                 modele.type === 'stop-rayon' ? '🛑' :
+                 modele.type === 'presentoir' ? '📦' :
+                 modele.type === 'totem' ? '🗿' :
+                 modele.type === 'vitrophanie' ? '🪟' : '📋'}
+              </span>
+            </div>
+            <div style={{ fontSize: '0.875rem', color: '#6b7280', marginTop: '0.5rem' }}>
+              {modele.type}
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* Instructions */}
-      <div style={{ 
+      <div className="animate-slideInUp" style={{ 
         background: 'white',
         padding: '2rem',
         borderRadius: '1rem',
@@ -254,13 +341,28 @@ function Exemplaires() {
         <h3 style={{ fontSize: '1.25rem', fontWeight: 'bold', marginBottom: '1rem', color: '#1f2937' }}>
           📖 Comment ça marche ?
         </h3>
-        <ol style={{ paddingLeft: '1.5rem', lineHeight: '1.8', color: '#6b7280' }}>
-          <li>Choisis un modèle de PLV existant</li>
-          <li>Définis le préfixe des QR codes (ex: PLV, KAK, STOP...)</li>
-          <li>Indique combien d'exemplaires tu veux créer</li>
-          <li>Les QR codes seront générés automatiquement avec numérotation (PLV001, PLV002...)</li>
-          <li>Retrouve tes QR codes dans la page "QR Codes" pour les imprimer</li>
+        <ol style={{ paddingLeft: '1.5rem', lineHeight: '2', color: '#6b7280' }}>
+          <li className="stagger-item">Choisis un modèle de PLV existant</li>
+          <li className="stagger-item" style={{ animationDelay: '0.05s' }}>Définis le préfixe des QR codes (ex: PLV, KAK, STOP...)</li>
+          <li className="stagger-item" style={{ animationDelay: '0.1s' }}>Indique combien d'exemplaires tu veux créer</li>
+          <li className="stagger-item" style={{ animationDelay: '0.15s' }}>Les QR codes seront générés automatiquement avec numérotation (PLV001, PLV002...)</li>
+          <li className="stagger-item" style={{ animationDelay: '0.2s' }}>Retrouve tes QR codes dans la page "QR Codes" pour les imprimer</li>
         </ol>
+
+        <div style={{
+          marginTop: '1.5rem',
+          padding: '1rem',
+          background: '#fef3c7',
+          borderRadius: '0.5rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem'
+        }}>
+          <span style={{ fontSize: '1.5rem' }}>💡</span>
+          <p style={{ fontSize: '0.875rem', color: '#92400e', margin: 0 }}>
+            <strong>Astuce :</strong> Utilise des préfixes différents pour chaque type de PLV (ex: KAK pour kakemonos, STOP pour stop-rayons)
+          </p>
+        </div>
       </div>
     </div>
   )
